@@ -7,6 +7,7 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://nova-prime-bac
 function Chat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
+  const [error, setError] = useState('');
 
   const sendMessage = async () => {
     try {
@@ -18,6 +19,7 @@ function Chat() {
 
       const token = await user.getIdToken();
 
+      // ✅ Fetch from the backend /chat endpoint
       const response = await fetch(`${BACKEND_URL}/chat`, {
         method: 'POST',
         headers: {
@@ -28,23 +30,29 @@ function Chat() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Backend error');
+        const errorText = await response.text(); // Plain text fallback for HTML errors
+        throw new Error(`Backend Error: ${errorText}`);
       }
 
       const data = await response.json();
+      if (!data || !data.response) {
+        throw new Error('Invalid response from backend.');
+      }
+
       const newMessage = { user: input, ai: data.response };
-      setMessages([...messages, newMessage]);
+      setMessages((prev) => [...prev, newMessage]);
       setInput('');
+      setError('');
     } catch (err) {
       console.error('Chat error:', err);
-      alert(err.message || 'Failed to send message.');
+      setError(err.message || 'Failed to send message.');
     }
   };
 
   return (
     <div className="chat-container">
       <h2>NovaPrime AI Chat</h2>
+
       <div className="chat-messages">
         {messages.map((msg, index) => (
           <div key={index} className="chat-message">
@@ -53,6 +61,7 @@ function Chat() {
           </div>
         ))}
       </div>
+
       <input
         type="text"
         placeholder="Type your message..."
@@ -60,6 +69,8 @@ function Chat() {
         onChange={(e) => setInput(e.target.value)}
       />
       <button onClick={sendMessage}>Send</button>
+
+      {error && <p className="error-message">{error}</p>}
     </div>
   );
 }
