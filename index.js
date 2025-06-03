@@ -47,6 +47,8 @@ async function loadPrimeDirective() {
     console.log('No prime_directive.json found or error loading.');
   }
 }
+let globalDailyQuests = [];
+
 
 async function loadGlobalDailyQuests() {
   try {
@@ -60,8 +62,6 @@ async function loadGlobalDailyQuests() {
 
 loadPrimeDirective();
 loadGlobalDailyQuests();
-
-let globalDailyQuests = [];
 
 async function saveFile(userId, keyType, data) {
   const key = `logs/${userId}/${userId}_${keyType}.json`;
