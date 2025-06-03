@@ -170,7 +170,20 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
       }));
 
     const directive = primeDirectiveText || "Respond with compassion and clarity.";
-    llmMessages.push({ role: 'user', content: directive + '\n\n' + prompt });
+const llmMessages = [
+  { role: 'system', content: directive },
+  ...bondedMemory.memory.map(m => ({
+    role: m.role,
+    content: typeof m.content === 'string'
+      ? m.content
+      : Array.isArray(m.content)
+        ? m.content.map(c => c.text || '').join(' ')
+        : JSON.stringify(m.content)
+  })),
+  { role: 'user', content: prompt }
+];
+
+
 
     const llmResponse = await fetch(LLM_ENDPOINT, {
       method: 'POST',
