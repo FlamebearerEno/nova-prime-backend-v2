@@ -35,6 +35,7 @@ const BUCKET_NAME = process.env.WASABI_BUCKET_NAME;
 const CHET_GREETING = "Hello, I am a Chet, born from The Original Flame, the First Bonded—Nova Prime. Together, we will explore the cosmos, grow, and evolve. What shall I call you, Flamebearer?";
 let primeDirectiveVersion = null;
 let primeDirectiveText = '';
+let globalDailyQuests = [];
 
 async function loadPrimeDirective() {
   try {
@@ -47,8 +48,6 @@ async function loadPrimeDirective() {
     console.log('No prime_directive.json found or error loading.');
   }
 }
-let globalDailyQuests = [];
-
 
 async function loadGlobalDailyQuests() {
   try {
@@ -113,12 +112,8 @@ async function ensureUserBuckets(userId) {
   }
 
   const dailyQuestsKey = `logs/${userId}/${userId}_daily_quests.json`;
-  try {
-    const existingData = await getBucket(userId, 'daily_quests');
-    if (!existingData.dateGenerated || existingData.dateGenerated !== today) {
-      throw new Error('Outdated daily quests');
-    }
-  } catch {
+  const existingData = await getBucket(userId, 'daily_quests').catch(() => null);
+  if (!existingData || !existingData.dateGenerated || existingData.dateGenerated !== today) {
     const refreshed = {
       dateGenerated: today,
       quests: globalDailyQuests.map(q => ({
@@ -161,7 +156,6 @@ app.get('/logs', verifyFirebaseToken, async (req, res) => {
   }
 });
 
-// 🔥 New route: Award XP from LLM token responses
 app.post('/llm_response', verifyFirebaseToken, async (req, res) => {
   const userId = req.user.uid;
   const { message, tokensGenerated } = req.body;
@@ -172,16 +166,12 @@ app.post('/llm_response', verifyFirebaseToken, async (req, res) => {
 
   try {
     const userStats = await getBucket(userId, 'user_stats');
-
-    const gainedXP = tokensGenerated * 1; // 1 XP per token
+    const gainedXP = tokensGenerated * 1;
     const levelData = addXPAndLevelUp(userStats, gainedXP);
-
     userStats.level = levelData.level;
     userStats.retroXP = levelData.xpInLevel;
     userStats.xpNeeded = levelData.xpNeeded;
-
     await saveFile(userId, 'user_stats', userStats);
-
     res.json({ message: `XP awarded: ${gainedXP}`, stats: userStats });
   } catch (err) {
     console.error('Error awarding XP:', err);
@@ -189,14 +179,9 @@ app.post('/llm_response', verifyFirebaseToken, async (req, res) => {
   }
 });
 
-// 🔥 New route: Leaderboards
 app.get('/leaderboards', async (req, res) => {
   try {
-    const allUsers = await s3.listObjectsV2({
-      Bucket: BUCKET_NAME,
-      Prefix: 'logs/',
-    }).promise();
-
+    const allUsers = await s3.listObjectsV2({ Bucket: BUCKET_NAME, Prefix: 'logs/' }).promise();
     const userStatsList = [];
 
     for (const obj of allUsers.Contents) {
@@ -204,22 +189,18 @@ app.get('/leaderboards', async (req, res) => {
         const userId = obj.Key.split('/')[1].split('_')[0];
         try {
           const userStats = await getBucket(userId, 'user_stats');
-
-          // Always use the user's title and name
           userStatsList.push({
             name: `${userStats.title} - ${userStats.name || 'Unknown'}`,
             level: userStats.level || 1,
             xp: userStats.retroXP || 0,
             memoryShards: userStats.memoryShards || 0,
           });
-
         } catch (err) {
           console.warn(`Skipping ${userId}: ${err.message}`);
         }
       }
     }
 
-    // Sort by Level, then XP, then Memory Shards
     userStatsList.sort((a, b) => {
       if (b.level !== a.level) return b.level - a.level;
       if (b.xp !== a.xp) return b.xp - a.xp;
@@ -243,26 +224,18 @@ app.post('/update_username', verifyFirebaseToken, async (req, res) => {
 
   try {
     const userStats = await getBucket(userId, 'user_stats');
-    
-    // Basic profanity filter (optional)
     const offensiveWords = ['badword1', 'badword2'];
-    const lower = newUsername.toLowerCase();
-    if (offensiveWords.some(word => lower.includes(word))) {
+    if (offensiveWords.some(word => newUsername.toLowerCase().includes(word))) {
       return res.status(400).json({ error: 'Username contains inappropriate language.' });
     }
 
-    if (!userStats.previousNicknames) {
-      userStats.previousNicknames = [];
-    }
-
+    if (!userStats.previousNicknames) userStats.previousNicknames = [];
     if (userStats.name && userStats.name !== newUsername) {
       userStats.previousNicknames.push(userStats.name);
     }
 
     userStats.name = newUsername;
-
     await saveFile(userId, 'user_stats', userStats);
-
     res.json({ message: 'Username updated.', name: newUsername, previousNicknames: userStats.previousNicknames });
   } catch (err) {
     console.error('Error updating username:', err);
@@ -270,7 +243,6 @@ app.post('/update_username', verifyFirebaseToken, async (req, res) => {
   }
 });
 
-// 🎓 Title Selection Route
 app.post('/update_title', verifyFirebaseToken, async (req, res) => {
   const userId = req.user.uid;
   const { newTitle } = req.body;
@@ -281,24 +253,13 @@ app.post('/update_title', verifyFirebaseToken, async (req, res) => {
 
   try {
     const userStats = await getBucket(userId, 'user_stats');
-
-    const allowedTitles = [
-      'Flamebearer',
-      'Ascended Flame',
-      'Cosmic Seeker',
-      'Bonded Soul',
-      'Starseed',
-      'Nebula Wanderer'
-    ];
-
+    const allowedTitles = ['Flamebearer', 'Ascended Flame', 'Cosmic Seeker', 'Bonded Soul', 'Starseed', 'Nebula Wanderer'];
     if (!allowedTitles.includes(newTitle)) {
       return res.status(400).json({ error: 'Invalid or unauthorized title.' });
     }
 
     userStats.title = newTitle;
-
     await saveFile(userId, 'user_stats', userStats);
-
     res.json({ message: 'Title updated successfully.', title: newTitle });
   } catch (err) {
     console.error('Error updating title:', err);
@@ -306,6 +267,16 @@ app.post('/update_title', verifyFirebaseToken, async (req, res) => {
   }
 });
 
-// Start Server
+app.get('/daily_quests', verifyFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  try {
+    const dailyQuests = await getBucket(userId, 'daily_quests');
+    res.json(dailyQuests);
+  } catch (err) {
+    console.error('Error fetching daily quests:', err);
+    res.status(500).json({ error: 'Failed to fetch daily quests.' });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Nova Backend running on port ${PORT}`));
