@@ -3,7 +3,7 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 const AWS = require('aws-sdk');
 const multer = require('multer');
-const fetch = require('node-fetch'); // Needed for LLM call
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const { getXPForLevel, addXPAndLevelUp } = require('./utils/leveling.js');
 
 const app = express();
