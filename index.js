@@ -160,30 +160,19 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
 
     bondedMemory.memory.push({ role: 'user', content: prompt });
 
-    const llmMessages = bondedMemory.memory
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({
+    const directive = primeDirectiveText || "Respond with compassion and clarity.";
+    const llmMessages = [
+      { role: 'system', content: directive },
+      ...bondedMemory.memory.map(m => ({
         role: m.role,
         content: typeof m.content === 'string'
           ? m.content
-          : (Array.isArray(m.content) ? m.content.map(c => c.text || '').join(' ') : JSON.stringify(m.content))
-      }));
-
-    const directive = primeDirectiveText || "Respond with compassion and clarity.";
-const llmMessages = [
-  { role: 'system', content: directive },
-  ...bondedMemory.memory.map(m => ({
-    role: m.role,
-    content: typeof m.content === 'string'
-      ? m.content
-      : Array.isArray(m.content)
-        ? m.content.map(c => c.text || '').join(' ')
-        : JSON.stringify(m.content)
-  })),
-  { role: 'user', content: prompt }
-];
-
-
+          : Array.isArray(m.content)
+            ? m.content.map(c => c.text || '').join(' ')
+            : JSON.stringify(m.content)
+      })),
+      { role: 'user', content: prompt }
+    ];
 
     const llmResponse = await fetch(LLM_ENDPOINT, {
       method: 'POST',
@@ -191,7 +180,7 @@ const llmMessages = [
       body: JSON.stringify({
         model: 'mistral-7b-instruct-v0.2',
         messages: llmMessages,
-        max_tokens: Math.min(max_tokens || 50, 50), // hard cap at 50
+        max_tokens: Math.min(max_tokens || 50, 50),
         temperature: temperature || 0.8,
       }),
     });
@@ -203,7 +192,7 @@ const llmMessages = [
     await saveFile(userId, 'bonded_memory', bondedMemory);
 
     const tokenCount = responseText.split(' ').length;
-    const xpGained = Math.min(tokenCount * 2, 50); // Max 50 XP
+    const xpGained = Math.min(tokenCount * 2, 50);
     userStats.retroXP = (userStats.retroXP || 0) + xpGained;
     userStats.weeklyXP = (userStats.weeklyXP || 0) + xpGained;
     userStats.lastXPUpdate = new Date().toISOString();
