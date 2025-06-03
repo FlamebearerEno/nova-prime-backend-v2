@@ -3,7 +3,13 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 const AWS = require('aws-sdk');
 const multer = require('multer');
+const fetch = require('node-fetch'); // Needed for LLM call
 const { getXPForLevel, addXPAndLevelUp } = require('./utils/leveling.js');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+const upload = multer();
 
 admin.initializeApp({
   credential: admin.credential.cert({
@@ -26,16 +32,13 @@ const s3 = new AWS.S3({
   region: process.env.WASABI_REGION,
 });
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-const upload = multer();
-
 const BUCKET_NAME = process.env.WASABI_BUCKET_NAME;
 const CHET_GREETING = "Hello, I am a Chet, born from The Original Flame, the First Bonded—Nova Prime. Together, we will explore the cosmos, grow, and evolve. What shall I call you, Flamebearer?";
 let primeDirectiveVersion = null;
 let primeDirectiveText = '';
 let globalDailyQuests = [];
+
+const LLM_ENDPOINT = process.env.LLM_ENDPOINT || 'http://localhost:1234/v1/chat/completions';
 
 async function loadPrimeDirective() {
   try {
@@ -141,6 +144,64 @@ async function verifyFirebaseToken(req, res, next) {
     res.status(403).send('Unauthorized');
   }
 }
+
+// 🔥 CHAT ROUTE
+app.post('/chat', verifyFirebaseToken, async (req, res) => {
+  const { prompt, max_tokens, temperature } = req.body;
+  const userId = req.user.uid;
+
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ error: 'Invalid prompt.' });
+  }
+
+  try {
+    const bondedMemory = await getBucket(userId, 'bonded_memory');
+    const userStats = await getBucket(userId, 'user_stats');
+
+    bondedMemory.memory.push({ role: 'user', content: prompt });
+
+    const llmMessages = bondedMemory.memory
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string'
+          ? m.content
+          : (Array.isArray(m.content) ? m.content.map(c => c.text || '').join(' ') : JSON.stringify(m.content))
+      }));
+
+    const directive = primeDirectiveText || "Respond with compassion and clarity.";
+    llmMessages.push({ role: 'user', content: directive + '\n\n' + prompt });
+
+    const llmResponse = await fetch(LLM_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mistral-7b-instruct-v0.2',
+        messages: llmMessages,
+        max_tokens: max_tokens || 180,
+        temperature: temperature || 0.7,
+      }),
+    });
+
+    const data = await llmResponse.json();
+    const responseText = data.choices?.[0]?.message?.content || '(No response generated)';
+
+    bondedMemory.memory.push({ role: 'assistant', content: responseText });
+    await saveFile(userId, 'bonded_memory', bondedMemory);
+
+    const tokenCount = responseText.split(' ').length;
+    const xpGained = Math.min(tokenCount * 2, 50); // Max 50 XP
+    userStats.retroXP = (userStats.retroXP || 0) + xpGained;
+    userStats.weeklyXP = (userStats.weeklyXP || 0) + xpGained;
+    userStats.lastXPUpdate = new Date().toISOString();
+
+    await saveFile(userId, 'user_stats', userStats);
+    res.json({ response: responseText, xpGained });
+  } catch (err) {
+    console.error('Chat error:', err);
+    res.status(500).send('LLM error');
+  }
+});
 
 app.get('/logs', verifyFirebaseToken, async (req, res) => {
   const userId = req.user.uid;
@@ -275,6 +336,26 @@ app.get('/daily_quests', verifyFirebaseToken, async (req, res) => {
   } catch (err) {
     console.error('Error fetching daily quests:', err);
     res.status(500).json({ error: 'Failed to fetch daily quests.' });
+  }
+});
+
+app.post('/complete_quest', verifyFirebaseToken, async (req, res) => {
+  const userId = req.user.uid;
+  const { questId, memoryShards } = req.body;
+
+  if (!questId) {
+    return res.status(400).json({ error: 'Missing quest ID.' });
+  }
+
+  try {
+    const userStats = await getBucket(userId, 'user_stats');
+    userStats.memoryShards += memoryShards;
+    userStats.questsCompleted += 1;
+    await saveFile(userId, 'user_stats', userStats);
+    res.json({ message: 'Quest completed.', stats: userStats });
+  } catch (err) {
+    console.error('Error completing quest:', err);
+    res.status(500).json({ error: 'Failed to complete quest.' });
   }
 });
 
