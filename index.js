@@ -178,7 +178,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
       body: JSON.stringify({
         model: 'mistral-7b-instruct-v0.2',
         messages: llmMessages,
-        max_tokens: max_tokens || 100,
+        max_tokens: Math.min(max_tokens || 50, 50), // hard cap at 50
         temperature: temperature || 0.8,
       }),
     });
