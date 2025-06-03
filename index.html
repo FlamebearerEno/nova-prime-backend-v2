@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nova Prime Chat Test</title>
+</head>
+<body>
+  <h1>Nova Prime Chat Test</h1>
+  <input type="text" id="prompt" placeholder="Type your message..." />
+  <button onclick="sendMessage()">Send</button>
+  <pre id="response"></pre>
+
+  <script>
+    async function sendMessage() {
+      const prompt = document.getElementById('prompt').value;
+      const responseDiv = document.getElementById('response');
+
+      try {
+        const res = await fetch('http://localhost:3000/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+        });
+        const data = await res.json();
+        responseDiv.textContent = data.response;
+      } catch (err) {
+        responseDiv.textContent = 'Error connecting to backend.';
+      }
+    }
+  </script>
+</body>
+</html>
