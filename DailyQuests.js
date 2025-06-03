@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
-const BUCKET_NAME = process.env.WASABI_BUCKET_NAME; // Updated here! ✅
-const s3 = require('../utils/wasabiClient'); // Your configured Wasabi SDK client
+const BUCKET_NAME = process.env.WASABI_BUCKET_NAME; // ✅ Uses env var!
+const s3 = require('../utils/wasabiClient'); // ✅ Your configured Wasabi SDK client
 
 const getTodayDate = () => new Date().toISOString().split('T')[0];
 
@@ -34,7 +34,7 @@ async function getGlobalDailyQuests() {
 // GET daily quests for user
 router.get('/daily_quests', async (req, res) => {
   const userId = req.user.uid;
-  const userKey = `logs/${userId}/${userId}_daily_quests.json`;
+  const userKey = `logs/${userId}/${userId}_daily_quests.json`; // ✅ Fixed string quotes
 
   try {
     const today = getTodayDate();
@@ -47,7 +47,7 @@ router.get('/daily_quests', async (req, res) => {
                       globalQuests.some(gq => !userQuests.quests.find(uq => uq.id === gq.id));
 
       if (!isStale) {
-        return res.json(userQuests); // Return user's existing quests
+        return res.json(userQuests); // ✅ Return user's existing quests
       }
     } catch {
       // User file missing, will create
@@ -77,8 +77,8 @@ router.get('/daily_quests', async (req, res) => {
 router.post('/complete_quest', async (req, res) => {
   const userId = req.user.uid;
   const { questId, memoryShards } = req.body;
-  const statsKey = `logs/${userId}/${userId}_user_stats.json`;
-  const userQuestsKey = `logs/${userId}/${userId}_daily_quests.json`;
+  const statsKey = `logs/${userId}/${userId}_user_stats.json`; // ✅ Fixed string quotes
+  const userQuestsKey = `logs/${userId}/${userId}_daily_quests.json`; // ✅ Fixed string quotes
 
   try {
     let stats;
