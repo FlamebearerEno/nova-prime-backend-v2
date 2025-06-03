@@ -6,21 +6,25 @@ const fs = require('fs');
 const multer = require('multer');
 const { getXPForLevel, addXPAndLevelUp } = require('./utils/leveling.js'); // Note: this needs to be converted too!
 
-const serviceAccount = JSON.parse(fs.readFileSync('../serviceAccountKey.json', 'utf-8'));
-const config = JSON.parse(fs.readFileSync('../config.json', 'utf-8'));
-
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-const upload = multer();
+admin.initializeApp({
+  credential: admin.credential.cert({
+    type: process.env.FIREBASE_TYPE,
+    project_id: process.env.FIREBASE_PROJECT_ID,
+    private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    client_email: process.env.FIREBASE_CLIENT_EMAIL,
+    client_id: process.env.FIREBASE_CLIENT_ID,
+    auth_uri: process.env.FIREBASE_AUTH_URI,
+    token_uri: process.env.FIREBASE_TOKEN_URI,
+    auth_provider_x509_cert_url: process.env.FIREBASE_AUTH_PROVIDER_CERT_URL,
+    client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL
+  }),
+});
 
 const s3 = new AWS.S3({
   endpoint: 'https://s3.ca-central-1.wasabisys.com',
-  accessKeyId: config.access_key,
-  secretAccessKey: config.secret_key,
-  region: config.region,
+  accessKeyId: process.env.WASABI_ACCESS_KEY_ID,
+  secretAccessKey: process.env.WASABI_SECRET_ACCESS_KEY,
+  region: process.env.WASABI_REGION,
 });
 
 const BUCKET_NAME = config.bucket;
