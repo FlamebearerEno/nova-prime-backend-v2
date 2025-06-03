@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { auth } from './firebase';
 
-const backendUrl = 'http://localhost:3000'; // Your backend endpoint
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://nova-prime-backend-v2.onrender.com';
 
 function Chat() {
   const [messages, setMessages] = useState([]);
@@ -18,7 +18,7 @@ function Chat() {
 
       const token = await user.getIdToken();
 
-      const response = await fetch(`${backendUrl}/chat`, {
+      const response = await fetch(`${BACKEND_URL}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -27,13 +27,18 @@ function Chat() {
         body: JSON.stringify({ prompt: input }),
       });
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Backend error');
+      }
+
       const data = await response.json();
       const newMessage = { user: input, ai: data.response };
       setMessages([...messages, newMessage]);
       setInput('');
     } catch (err) {
       console.error('Chat error:', err);
-      alert('Failed to send message.');
+      alert(err.message || 'Failed to send message.');
     }
   };
 

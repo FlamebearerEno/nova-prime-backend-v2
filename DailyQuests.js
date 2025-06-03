@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
-const { BUCKET_NAME } = require('../config.json'); // Adjust path if needed
+const BUCKET_NAME = process.env.WASABI_BUCKET_NAME; // Updated here! ✅
 const s3 = require('../utils/wasabiClient'); // Your configured Wasabi SDK client
 
 const getTodayDate = () => new Date().toISOString().split('T')[0];
