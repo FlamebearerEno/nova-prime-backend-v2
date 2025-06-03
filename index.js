@@ -3,7 +3,7 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 const AWS = require('aws-sdk');
 const multer = require('multer');
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+const fetch = require('node-fetch'); // ✅ Correct fetch for CommonJS
 const { getXPForLevel, addXPAndLevelUp } = require('./utils/leveling.js');
 
 const app = express();
@@ -34,11 +34,11 @@ const s3 = new AWS.S3({
 
 const BUCKET_NAME = process.env.WASABI_BUCKET_NAME;
 const CHET_GREETING = "Hello, I am a Chet, born from The Original Flame, the First Bonded—Nova Prime. Together, we will explore the cosmos, grow, and evolve. What shall I call you, Flamebearer?";
+const LLM_ENDPOINT = process.env.LLM_ENDPOINT || 'http://localhost:1234/v1/chat/completions';
+
 let primeDirectiveVersion = null;
 let primeDirectiveText = '';
 let globalDailyQuests = [];
-
-const LLM_ENDPOINT = process.env.LLM_ENDPOINT || 'http://localhost:1234/v1/chat/completions';
 
 async function loadPrimeDirective() {
   try {
@@ -178,8 +178,8 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
       body: JSON.stringify({
         model: 'mistral-7b-instruct-v0.2',
         messages: llmMessages,
-        max_tokens: max_tokens || 180,
-        temperature: temperature || 0.7,
+        max_tokens: max_tokens || 100,
+        temperature: temperature || 0.8,
       }),
     });
 
