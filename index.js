@@ -163,7 +163,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     const directive = primeDirectiveText || "Respond with compassion and clarity.";
     const llmMessages = [
       { role: 'system', content: directive },
-      ...bondedMemory.memory.map(m => ({
+      ...bondedMemory.memory.slice(-20).map(m => ({
         role: m.role,
         content: typeof m.content === 'string'
           ? m.content
@@ -186,7 +186,13 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     });
 
     const data = await llmResponse.json();
-    const responseText = data.choices?.[0]?.message?.content || '(No response generated)';
+    const responseText = data.choices?.[0]?.message?.content?.trim();
+
+    // 🛡️ Handle invalid or empty responses
+    if (!responseText || responseText.length < 3) {
+      console.error("⚠️ LLM returned an empty or invalid response.");
+      return res.status(500).send('LLM error');
+    }
 
     bondedMemory.memory.push({ role: 'assistant', content: responseText });
     await saveFile(userId, 'bonded_memory', bondedMemory);
