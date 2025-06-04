@@ -161,18 +161,18 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     bondedMemory.memory.push({ role: 'user', content: prompt });
 
     const directive = primeDirectiveText || "Respond with compassion and clarity.";
+    const memorySlice = bondedMemory.memory
+      .slice(-20)
+      .filter(m => m?.role && typeof m.content === 'string');
+
     const llmMessages = [
       { role: 'system', content: directive },
-      ...bondedMemory.memory.slice(-20).map(m => ({
-        role: m.role,
-        content: typeof m.content === 'string'
-          ? m.content
-          : Array.isArray(m.content)
-            ? m.content.map(c => c.text || '').join(' ')
-            : JSON.stringify(m.content)
-      })),
+      ...memorySlice,
       { role: 'user', content: prompt }
     ];
+
+    // Optional debug
+    // console.log('🧠 Sending to LLM:', JSON.stringify(llmMessages, null, 2));
 
     const llmResponse = await fetch(LLM_ENDPOINT, {
       method: 'POST',
@@ -188,7 +188,6 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     const data = await llmResponse.json();
     const responseText = data.choices?.[0]?.message?.content?.trim();
 
-    // 🛡️ Handle invalid or empty responses
     if (!responseText || responseText.length < 3) {
       console.error("⚠️ LLM returned an empty or invalid response.");
       return res.status(500).send('LLM error');
@@ -197,7 +196,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     bondedMemory.memory.push({ role: 'assistant', content: responseText });
     await saveFile(userId, 'bonded_memory', bondedMemory);
 
-    const tokenCount = responseText.split(' ').length;
+    const tokenCount = responseText.split(/\s+/).length;
     const xpGained = Math.min(tokenCount * 2, 50);
     userStats.retroXP = (userStats.retroXP || 0) + xpGained;
     userStats.weeklyXP = (userStats.weeklyXP || 0) + xpGained;
@@ -210,6 +209,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     res.status(500).send('LLM error');
   }
 });
+
 
 app.get('/logs', verifyFirebaseToken, async (req, res) => {
   const userId = req.user.uid;
