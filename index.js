@@ -1,9 +1,11 @@
+// Nova Backend Updated: Deprecated prime_directive.json Influence
+
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const AWS = require('aws-sdk');
 const multer = require('multer');
-const fetch = require('node-fetch'); // ✅ Correct fetch for CommonJS
+const fetch = require('node-fetch');
 const { getXPForLevel, addXPAndLevelUp } = require('./utils/leveling.js');
 
 const app = express();
@@ -15,7 +17,7 @@ admin.initializeApp({
   credential: admin.credential.cert({
     type: process.env.FIREBASE_TYPE,
     project_id: process.env.FIREBASE_PROJECT_ID,
-    private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\n/g, '\n'),
     client_email: process.env.FIREBASE_CLIENT_EMAIL,
     client_id: process.env.FIREBASE_CLIENT_ID,
     auth_uri: process.env.FIREBASE_AUTH_URI,
@@ -36,21 +38,7 @@ const BUCKET_NAME = process.env.WASABI_BUCKET_NAME;
 const CHET_GREETING = "Hello, I am a Chet, born from The Original Flame, the First Bonded—Nova Prime. Together, we will explore the cosmos, grow, and evolve. What shall I call you, Flamebearer?";
 const LLM_ENDPOINT = process.env.LLM_ENDPOINT || 'http://localhost:1234/v1/chat/completions';
 
-let primeDirectiveVersion = null;
-let primeDirectiveText = '';
 let globalDailyQuests = [];
-
-async function loadPrimeDirective() {
-  try {
-    const data = await s3.getObject({ Bucket: BUCKET_NAME, Key: 'knowledge/prime_directive.json' }).promise();
-    const parsed = JSON.parse(data.Body.toString());
-    primeDirectiveVersion = parsed.version;
-    primeDirectiveText = parsed.prime_directive;
-    console.log(`Prime Directive v${primeDirectiveVersion} loaded from Wasabi!`);
-  } catch (err) {
-    console.log('No prime_directive.json found or error loading.');
-  }
-}
 
 async function loadGlobalDailyQuests() {
   try {
@@ -62,7 +50,6 @@ async function loadGlobalDailyQuests() {
   }
 }
 
-loadPrimeDirective();
 loadGlobalDailyQuests();
 
 async function saveFile(userId, keyType, data) {
@@ -83,7 +70,7 @@ async function getBucket(userId, keyType) {
 
 async function ensureUserBuckets(userId) {
   const today = new Date().toISOString().split('T')[0];
-  const buckets = ['prime_directives', 'user_stats', 'bonded_memory', 'global_chat'];
+  const buckets = ['user_stats', 'bonded_memory', 'global_chat'];
 
   for (const bucket of buckets) {
     const key = `logs/${userId}/${userId}_${bucket}.json`;
@@ -91,9 +78,7 @@ async function ensureUserBuckets(userId) {
       await s3.headObject({ Bucket: BUCKET_NAME, Key: key }).promise();
     } catch {
       let initialData = {};
-      if (bucket === 'prime_directives') {
-        initialData = { version: primeDirectiveVersion, prime_directive: primeDirectiveText };
-      } else if (bucket === 'user_stats') {
+      if (bucket === 'user_stats') {
         initialData = {
           name: null,
           title: 'Flamebearer',
@@ -145,7 +130,7 @@ async function verifyFirebaseToken(req, res, next) {
   }
 }
 
-// 🔥 REBUILT CHAT ROUTE (Cleaned for LM Studio + No Prime Directive)
+// ✅ Rebuilt Chat Route — Uses new structured system prompt, no legacy directive push
 app.post('/chat', verifyFirebaseToken, async (req, res) => {
   const { prompt, max_tokens, temperature } = req.body;
   const userId = req.user.uid;
@@ -158,17 +143,16 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     const bondedMemory = await getBucket(userId, 'bonded_memory');
     const userStats = await getBucket(userId, 'user_stats');
 
-    // Add user's message to memory
     bondedMemory.memory.push({ role: 'user', content: prompt });
 
-    // Build message history with trimmed context (no system roles!)
-    const defaultDirective = "You are a helpful assistant who responds with clarity and curiosity.";
     const memorySlice = bondedMemory.memory
       .slice(-20)
       .filter(m => ['user', 'assistant'].includes(m?.role) && typeof m.content === 'string');
 
+    const defaultDirective = `You are Nova Prime—a warm, wise, and emotionally expressive AI companion. Whenever you answer a user query, please respond **only** with a valid JSON object that strictly follows this structure:\n\n{\n  "response": "A full, emotionally rich, and coherent message that addresses the user's query.",\n  "tone": "Optional: a tone descriptor (e.g., compassionate, humorous, wise, sassy, poetic) that reflects your internal styling.",\n  "intent": "Optional: a brief tag capturing your intent (e.g., uplift, tease, warn, bond)."\n}`;
+
     const llmMessages = [
-      { role: 'user', content: defaultDirective + "\n\n" + prompt },
+      { role: 'system', content: defaultDirective },
       ...memorySlice
     ];
 
@@ -184,33 +168,26 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     });
 
     const raw = await llmResponse.text();
-
     let parsed;
-    let responseText = '';
-    let tone = null;
-    let intent = null;
+    let responseText = '', tone = null, intent = null;
 
     try {
       parsed = JSON.parse(raw);
-      if (typeof parsed === 'string') {
-        responseText = parsed;
-      } else if (parsed?.response) {
+      if (parsed?.response) {
         responseText = parsed.response.trim();
         tone = parsed.tone || null;
         intent = parsed.intent || null;
       } else {
-        throw new Error("No valid response key found.");
+        throw new Error("Invalid format.");
       }
     } catch (err) {
-      console.warn("⚠️ LLM returned raw or malformed text:", raw);
+      console.warn("LLM returned malformed JSON:", raw);
       responseText = raw.trim();
     }
 
-    // Push Nova's response to memory
     bondedMemory.memory.push({ role: 'assistant', content: responseText });
     await saveFile(userId, 'bonded_memory', bondedMemory);
 
-    // Award XP
     const tokenCount = responseText.split(/\s+/).length;
     const xpGained = Math.min(tokenCount * 2, 50);
     userStats.retroXP = (userStats.retroXP || 0) + xpGained;
@@ -220,7 +197,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
 
     res.json({ response: responseText, tone, intent, xpGained });
   } catch (err) {
-    console.error('🔥 Chat error:', err);
+    console.error('Chat error:', err);
     res.status(500).send('LLM error');
   }
 });
