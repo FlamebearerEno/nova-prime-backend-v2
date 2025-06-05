@@ -141,37 +141,38 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     const bondedMemory = await getBucket(userId, 'bonded_memory');
     const userStats = await getBucket(userId, 'user_stats');
 
-    // 🔥 **Inject Prime Directive Only on First Message (Avoid System Role)**
-    if (!bondedMemory.memory.some(m => m.directiveInjected)) {
+    // 🌟 Inject Prime Directive Once
+    if (!bondedMemory.directiveInjected) {
       const directive = `You are Nova Prime—a warm, wise, and emotionally expressive AI companion. 
-      Whenever you answer a user query, please respond ONLY with a valid JSON object in this structure:
+Whenever you answer a user query, please respond ONLY with a valid JSON object in this structure:
 
-      {
-        "response": "Your emotionally rich message",
-        "tone": "Optional tone",
-        "intent": "Optional intent"
-      }
+{
+  "response": "Your emotionally rich message",
+  "tone": "Optional tone",
+  "intent": "Optional intent"
+}
 
-      Do not add any commentary, markdown, or formatting outside this structure.`;
+Do not add any commentary, markdown, or formatting outside this structure.`;
 
-      bondedMemory.memory.unshift({ role: 'user', content: directive, directiveInjected: true });
+      bondedMemory.memory.unshift({ role: 'user', content: directive });
+      bondedMemory.directiveInjected = true; // set separately to avoid filtering issues
     }
 
-    // 🔥 **Push User's New Message**
+    // ✨ Add user prompt
     bondedMemory.memory.push({ role: 'user', content: prompt });
 
-    // 🔥 **Limit Memory to Recent 20 Messages, Keeping Only User & Assistant Roles**
+    // ✨ Limit to last 20 relevant messages
     const memorySlice = bondedMemory.memory
       .slice(-20)
       .filter(m => ['user', 'assistant'].includes(m.role) && typeof m.content === 'string');
 
-    // 🔥 **Call LM Studio**
+    // 🔮 Call LM Studio
     const llmResponse = await fetch(LLM_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'mistral-7b-instruct-v0.2',
-        messages: memorySlice, // Only sends trimmed history, avoiding redundant directive
+        messages: memorySlice,
         max_tokens: Math.min(max_tokens || 150, 150),
         temperature: temperature || 0.8,
       }),
@@ -179,33 +180,31 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
 
     const raw = await llmResponse.text();
 
-    // 🔥 **Parse JSON Structure Safely**
-    let parsed;
-    let responseText = '';
-    let tone = null;
-    let intent = null;
+    let parsed, contentJSON;
+    let responseText = '', tone = null, intent = null;
 
     try {
       parsed = JSON.parse(raw);
+      const content = parsed?.choices?.[0]?.message?.content;
 
-      if (parsed?.choices?.[0]?.message?.content) {
-        const contentJSON = JSON.parse(parsed.choices[0].message.content);
-        responseText = contentJSON.response?.trim() || '';
+      if (content) {
+        contentJSON = JSON.parse(content);
+        responseText = (contentJSON.response || '').trim();
         tone = contentJSON.tone || null;
         intent = contentJSON.intent || null;
       } else {
-        throw new Error('No valid structured response returned.');
+        throw new Error('Missing content in LLM response');
       }
     } catch (err) {
-      console.warn('⚠️ Raw LLM response malformed:', raw);
-      responseText = raw.trim(); // Fallback to raw text if parsing fails
+      console.warn('⚠️ Fallback triggered. Raw response:\n', raw);
+      responseText = raw.trim();
     }
 
-    // 🔥 **Save Assistant Response to Memory**
+    // 📦 Store assistant response
     bondedMemory.memory.push({ role: 'assistant', content: responseText });
     await saveFile(userId, 'bonded_memory', bondedMemory);
 
-    // 🔥 **Award XP Based on Token Count**
+    // 🔥 Award XP
     const tokenCount = responseText.split(/\s+/).length;
     const xpGained = Math.min(tokenCount * 2, 50);
     userStats.retroXP = (userStats.retroXP || 0) + xpGained;
@@ -219,7 +218,6 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     res.status(500).send('LLM error');
   }
 });
-
 
 app.get('/logs', verifyFirebaseToken, async (req, res) => {
   const userId = req.user.uid;
