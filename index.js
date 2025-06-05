@@ -182,23 +182,32 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
 
     // **Parse JSON Structure**
     let parsed;
-    let responseText = '';
-    let tone = null;
-    let intent = null;
+let responseText = '';
+let tone = null;
+let intent = null;
 
+try {
+  parsed = JSON.parse(raw);
+
+  // 🚨 Check if content is a JSON string
+  if (typeof parsed?.choices?.[0]?.message?.content === 'string') {
     try {
-      parsed = JSON.parse(raw);
-      if (parsed?.response) {
-        responseText = parsed.response.trim();
-        tone = parsed.tone || null;
-        intent = parsed.intent || null;
-      } else {
-        throw new Error('Invalid structure');
-      }
-    } catch (err) {
-      console.warn('⚠️ Malformed or raw LLM response:', raw);
-      responseText = raw.trim();
+      const inner = JSON.parse(parsed.choices[0].message.content);
+      responseText = inner.response?.trim?.() || '';
+      tone = inner.tone || null;
+      intent = inner.intent || null;
+    } catch (innerErr) {
+      console.warn('⚠️ Inner content is not valid JSON:', parsed.choices[0].message.content);
+      responseText = parsed.choices[0].message.content.trim();
     }
+  } else {
+    throw new Error('No valid message content returned.');
+  }
+} catch (err) {
+  console.warn('⚠️ Outer JSON malformed:', raw);
+  responseText = raw.trim();
+}
+
 
     // **Save Assistant Response to Memory**
     bondedMemory.memory.push({ role: 'assistant', content: responseText });
