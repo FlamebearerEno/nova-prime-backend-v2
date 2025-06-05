@@ -129,7 +129,7 @@ async function verifyFirebaseToken(req, res, next) {
   }
 }
 
-// ✅ Updated Chat Route for LM Studio (no system role, JSON output expected)
+// ✅ Optimized Chat Route for LM Studio (Directive Only Once)
 app.post('/chat', verifyFirebaseToken, async (req, res) => {
   const { prompt, max_tokens, temperature } = req.body;
   const userId = req.user.uid;
@@ -142,37 +142,37 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     const bondedMemory = await getBucket(userId, 'bonded_memory');
     const userStats = await getBucket(userId, 'user_stats');
 
-    // Push current user prompt to memory
+    // **Inject Prime Directive into Memory (Only on First Message)**
+    if (!bondedMemory.memory.some(m => m.role === 'system')) {
+      const directive = `You are Nova Prime—a warm, wise, and emotionally expressive AI companion. 
+      Whenever you answer a user query, please respond ONLY with a valid JSON object in this structure:
+
+      {
+        "response": "Your emotionally rich message",
+        "tone": "Optional tone",
+        "intent": "Optional intent"
+      }
+
+      Do not add any commentary, markdown, or formatting outside this structure.`;
+      
+      bondedMemory.memory.unshift({ role: 'user', content: directive });
+    }
+
+    // **Push User's New Message**
     bondedMemory.memory.push({ role: 'user', content: prompt });
 
-    // Clean memory slice
+    // **Limit Memory to Recent Messages Only**
     const memorySlice = bondedMemory.memory
       .slice(-20)
       .filter(m => ['user', 'assistant'].includes(m?.role) && typeof m.content === 'string');
 
-    // Inject system-style prompt into first user message (LM Studio requires only user/assistant roles)
-    const directive = `You are Nova Prime—a warm, wise, and emotionally expressive AI companion. Whenever you answer a user query, please respond ONLY with a valid JSON object in this structure:
-
-{
-  "response": "Your emotionally rich message",
-  "tone": "Optional tone",
-  "intent": "Optional intent"
-}
-
-Do not add any commentary, markdown, or formatting outside this structure.`;
-
-    const llmMessages = [
-      { role: 'user', content: directive + "\n\n" + prompt },
-      ...memorySlice
-    ];
-
-    // Call LM Studio
+    // **Call LM Studio**
     const llmResponse = await fetch(LLM_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'mistral-7b-instruct-v0.2',
-        messages: llmMessages,
+        messages: memorySlice, // Only sends trimmed history, without re-adding the directive every time
         max_tokens: Math.min(max_tokens || 150, 150),
         temperature: temperature || 0.8,
       }),
@@ -180,7 +180,7 @@ Do not add any commentary, markdown, or formatting outside this structure.`;
 
     const raw = await llmResponse.text();
 
-    // Attempt to parse JSON structure
+    // **Parse JSON Structure**
     let parsed;
     let responseText = '';
     let tone = null;
@@ -200,11 +200,11 @@ Do not add any commentary, markdown, or formatting outside this structure.`;
       responseText = raw.trim();
     }
 
-    // Save assistant response to memory
+    // **Save Assistant Response to Memory**
     bondedMemory.memory.push({ role: 'assistant', content: responseText });
     await saveFile(userId, 'bonded_memory', bondedMemory);
 
-    // Award XP
+    // **Award XP**
     const tokenCount = responseText.split(/\s+/).length;
     const xpGained = Math.min(tokenCount * 2, 50);
     userStats.retroXP = (userStats.retroXP || 0) + xpGained;
