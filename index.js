@@ -145,7 +145,7 @@ async function verifyFirebaseToken(req, res, next) {
   }
 }
 
-// 🔥 REBUILT CHAT ROUTE (Directive-as-User, No System Role)
+// 🔥 REBUILT CHAT ROUTE (Cleaned for LM Studio + No Prime Directive)
 app.post('/chat', verifyFirebaseToken, async (req, res) => {
   const { prompt, max_tokens, temperature } = req.body;
   const userId = req.user.uid;
@@ -158,18 +158,17 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     const bondedMemory = await getBucket(userId, 'bonded_memory');
     const userStats = await getBucket(userId, 'user_stats');
 
-    // Add user message to memory
+    // Add user's message to memory
     bondedMemory.memory.push({ role: 'user', content: prompt });
 
-    // Create base directive as a normal user message (not system!)
-    const directive = "You are a helpful assistant named Nova who responds clearly and conversationally.";
+    // Build message history with trimmed context (no system roles!)
+    const defaultDirective = "You are a helpful assistant who responds with clarity and curiosity.";
     const memorySlice = bondedMemory.memory
       .slice(-20)
-      .filter(m => m?.role && typeof m.content === 'string');
+      .filter(m => ['user', 'assistant'].includes(m?.role) && typeof m.content === 'string');
 
-    // 👇 NEW: Merge directive into first user message to avoid "system" role
     const llmMessages = [
-      { role: 'user', content: directive + "\n\n" + prompt },
+      { role: 'user', content: defaultDirective + "\n\n" + prompt },
       ...memorySlice
     ];
 
@@ -186,12 +185,13 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
 
     const raw = await llmResponse.text();
 
+    let parsed;
     let responseText = '';
     let tone = null;
     let intent = null;
 
     try {
-      const parsed = JSON.parse(raw);
+      parsed = JSON.parse(raw);
       if (typeof parsed === 'string') {
         responseText = parsed;
       } else if (parsed?.response) {
@@ -202,7 +202,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
         throw new Error("No valid response key found.");
       }
     } catch (err) {
-      console.warn("⚠️ LLM returned raw text:", raw);
+      console.warn("⚠️ LLM returned raw or malformed text:", raw);
       responseText = raw.trim();
     }
 
@@ -210,7 +210,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     bondedMemory.memory.push({ role: 'assistant', content: responseText });
     await saveFile(userId, 'bonded_memory', bondedMemory);
 
-    // XP reward
+    // Award XP
     const tokenCount = responseText.split(/\s+/).length;
     const xpGained = Math.min(tokenCount * 2, 50);
     userStats.retroXP = (userStats.retroXP || 0) + xpGained;
