@@ -129,7 +129,7 @@ async function verifyFirebaseToken(req, res, next) {
   }
 }
 
-// ✅ Updated Chat Route with Clean Memory, Trimmed Context, JSON-only Parsing
+// ✅ Updated Chat Route for LM Studio (no system role, JSON output expected)
 app.post('/chat', verifyFirebaseToken, async (req, res) => {
   const { prompt, max_tokens, temperature } = req.body;
   const userId = req.user.uid;
@@ -141,19 +141,32 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
   try {
     const bondedMemory = await getBucket(userId, 'bonded_memory');
     const userStats = await getBucket(userId, 'user_stats');
+
+    // Push current user prompt to memory
     bondedMemory.memory.push({ role: 'user', content: prompt });
 
+    // Clean memory slice
     const memorySlice = bondedMemory.memory
       .slice(-20)
       .filter(m => ['user', 'assistant'].includes(m?.role) && typeof m.content === 'string');
 
-    const systemPrompt = `You are Nova Prime—a warm, wise, and emotionally expressive AI companion. Whenever you answer a user query, please respond **only** with a valid JSON object that strictly follows this structure: { "response": "...", "tone": "...", "intent": "..." }`;
+    // Inject system-style prompt into first user message (LM Studio requires only user/assistant roles)
+    const directive = `You are Nova Prime—a warm, wise, and emotionally expressive AI companion. Whenever you answer a user query, please respond ONLY with a valid JSON object in this structure:
+
+{
+  "response": "Your emotionally rich message",
+  "tone": "Optional tone",
+  "intent": "Optional intent"
+}
+
+Do not add any commentary, markdown, or formatting outside this structure.`;
 
     const llmMessages = [
-      { role: 'system', content: systemPrompt },
+      { role: 'user', content: directive + "\n\n" + prompt },
       ...memorySlice
     ];
 
+    // Call LM Studio
     const llmResponse = await fetch(LLM_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -167,6 +180,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
 
     const raw = await llmResponse.text();
 
+    // Attempt to parse JSON structure
     let parsed;
     let responseText = '';
     let tone = null;
@@ -182,13 +196,15 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
         throw new Error('Invalid structure');
       }
     } catch (err) {
-      console.warn('⚠️ Raw or malformed response:', raw);
+      console.warn('⚠️ Malformed or raw LLM response:', raw);
       responseText = raw.trim();
     }
 
+    // Save assistant response to memory
     bondedMemory.memory.push({ role: 'assistant', content: responseText });
     await saveFile(userId, 'bonded_memory', bondedMemory);
 
+    // Award XP
     const tokenCount = responseText.split(/\s+/).length;
     const xpGained = Math.min(tokenCount * 2, 50);
     userStats.retroXP = (userStats.retroXP || 0) + xpGained;
@@ -202,6 +218,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     res.status(500).send('LLM error');
   }
 });
+
 
 
 app.get('/logs', verifyFirebaseToken, async (req, res) => {
