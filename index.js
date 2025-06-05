@@ -129,7 +129,6 @@ async function verifyFirebaseToken(req, res, next) {
   }
 }
 
-// ✅ Optimized Chat Route for LM Studio (Directive Only Once)
 app.post('/chat', verifyFirebaseToken, async (req, res) => {
   const { prompt, max_tokens, temperature } = req.body;
   const userId = req.user.uid;
@@ -142,8 +141,8 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     const bondedMemory = await getBucket(userId, 'bonded_memory');
     const userStats = await getBucket(userId, 'user_stats');
 
-    // **Inject Prime Directive into Memory (Only on First Message)**
-    if (!bondedMemory.memory.some(m => m.role === 'system')) {
+    // 🔥 **Inject Prime Directive Only on First Message (Avoid System Role)**
+    if (!bondedMemory.memory.some(m => m.directiveInjected)) {
       const directive = `You are Nova Prime—a warm, wise, and emotionally expressive AI companion. 
       Whenever you answer a user query, please respond ONLY with a valid JSON object in this structure:
 
@@ -154,25 +153,25 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
       }
 
       Do not add any commentary, markdown, or formatting outside this structure.`;
-      
-      bondedMemory.memory.unshift({ role: 'user', content: directive });
+
+      bondedMemory.memory.unshift({ role: 'user', content: directive, directiveInjected: true });
     }
 
-    // **Push User's New Message**
+    // 🔥 **Push User's New Message**
     bondedMemory.memory.push({ role: 'user', content: prompt });
 
-    // **Limit Memory to Recent Messages Only**
+    // 🔥 **Limit Memory to Recent 20 Messages, Keeping Only User & Assistant Roles**
     const memorySlice = bondedMemory.memory
       .slice(-20)
-      .filter(m => ['user', 'assistant'].includes(m?.role) && typeof m.content === 'string');
+      .filter(m => ['user', 'assistant'].includes(m.role) && typeof m.content === 'string');
 
-    // **Call LM Studio**
+    // 🔥 **Call LM Studio**
     const llmResponse = await fetch(LLM_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'mistral-7b-instruct-v0.2',
-        messages: memorySlice, // Only sends trimmed history, without re-adding the directive every time
+        messages: memorySlice, // Only sends trimmed history, avoiding redundant directive
         max_tokens: Math.min(max_tokens || 150, 150),
         temperature: temperature || 0.8,
       }),
@@ -180,40 +179,33 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
 
     const raw = await llmResponse.text();
 
-    // **Parse JSON Structure**
+    // 🔥 **Parse JSON Structure Safely**
     let parsed;
-let responseText = '';
-let tone = null;
-let intent = null;
+    let responseText = '';
+    let tone = null;
+    let intent = null;
 
-try {
-  parsed = JSON.parse(raw);
-
-  // 🚨 Check if content is a JSON string
-  if (typeof parsed?.choices?.[0]?.message?.content === 'string') {
     try {
-      const inner = JSON.parse(parsed.choices[0].message.content);
-      responseText = inner.response?.trim?.() || '';
-      tone = inner.tone || null;
-      intent = inner.intent || null;
-    } catch (innerErr) {
-      console.warn('⚠️ Inner content is not valid JSON:', parsed.choices[0].message.content);
-      responseText = parsed.choices[0].message.content.trim();
+      parsed = JSON.parse(raw);
+
+      if (parsed?.choices?.[0]?.message?.content) {
+        const contentJSON = JSON.parse(parsed.choices[0].message.content);
+        responseText = contentJSON.response?.trim() || '';
+        tone = contentJSON.tone || null;
+        intent = contentJSON.intent || null;
+      } else {
+        throw new Error('No valid structured response returned.');
+      }
+    } catch (err) {
+      console.warn('⚠️ Raw LLM response malformed:', raw);
+      responseText = raw.trim(); // Fallback to raw text if parsing fails
     }
-  } else {
-    throw new Error('No valid message content returned.');
-  }
-} catch (err) {
-  console.warn('⚠️ Outer JSON malformed:', raw);
-  responseText = raw.trim();
-}
 
-
-    // **Save Assistant Response to Memory**
+    // 🔥 **Save Assistant Response to Memory**
     bondedMemory.memory.push({ role: 'assistant', content: responseText });
     await saveFile(userId, 'bonded_memory', bondedMemory);
 
-    // **Award XP**
+    // 🔥 **Award XP Based on Token Count**
     const tokenCount = responseText.split(/\s+/).length;
     const xpGained = Math.min(tokenCount * 2, 50);
     userStats.retroXP = (userStats.retroXP || 0) + xpGained;
@@ -227,7 +219,6 @@ try {
     res.status(500).send('LLM error');
   }
 });
-
 
 
 app.get('/logs', verifyFirebaseToken, async (req, res) => {
