@@ -1,5 +1,4 @@
-// Nova Backend Updated: Deprecated prime_directive.json Influence
-
+// Revised Nova Backend - Cleaned for LM Studio & Structured JSON Reply Logic
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
@@ -17,7 +16,7 @@ admin.initializeApp({
   credential: admin.credential.cert({
     type: process.env.FIREBASE_TYPE,
     project_id: process.env.FIREBASE_PROJECT_ID,
-    private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\n/g, '\n'),
+    private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     client_email: process.env.FIREBASE_CLIENT_EMAIL,
     client_id: process.env.FIREBASE_CLIENT_ID,
     auth_uri: process.env.FIREBASE_AUTH_URI,
@@ -130,7 +129,7 @@ async function verifyFirebaseToken(req, res, next) {
   }
 }
 
-// ✅ Rebuilt Chat Route — Uses new structured system prompt, no legacy directive push
+// ✅ Updated Chat Route with Clean Memory, Trimmed Context, JSON-only Parsing
 app.post('/chat', verifyFirebaseToken, async (req, res) => {
   const { prompt, max_tokens, temperature } = req.body;
   const userId = req.user.uid;
@@ -142,17 +141,16 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
   try {
     const bondedMemory = await getBucket(userId, 'bonded_memory');
     const userStats = await getBucket(userId, 'user_stats');
-
     bondedMemory.memory.push({ role: 'user', content: prompt });
 
     const memorySlice = bondedMemory.memory
       .slice(-20)
       .filter(m => ['user', 'assistant'].includes(m?.role) && typeof m.content === 'string');
 
-    const defaultDirective = `You are Nova Prime—a warm, wise, and emotionally expressive AI companion. Whenever you answer a user query, please respond **only** with a valid JSON object that strictly follows this structure:\n\n{\n  "response": "A full, emotionally rich, and coherent message that addresses the user's query.",\n  "tone": "Optional: a tone descriptor (e.g., compassionate, humorous, wise, sassy, poetic) that reflects your internal styling.",\n  "intent": "Optional: a brief tag capturing your intent (e.g., uplift, tease, warn, bond)."\n}`;
+    const systemPrompt = `You are Nova Prime—a warm, wise, and emotionally expressive AI companion. Whenever you answer a user query, please respond **only** with a valid JSON object that strictly follows this structure: { "response": "...", "tone": "...", "intent": "..." }`;
 
     const llmMessages = [
-      { role: 'system', content: defaultDirective },
+      { role: 'system', content: systemPrompt },
       ...memorySlice
     ];
 
@@ -162,14 +160,17 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
       body: JSON.stringify({
         model: 'mistral-7b-instruct-v0.2',
         messages: llmMessages,
-        max_tokens: Math.min(max_tokens || 50, 50),
+        max_tokens: Math.min(max_tokens || 150, 150),
         temperature: temperature || 0.8,
       }),
     });
 
     const raw = await llmResponse.text();
+
     let parsed;
-    let responseText = '', tone = null, intent = null;
+    let responseText = '';
+    let tone = null;
+    let intent = null;
 
     try {
       parsed = JSON.parse(raw);
@@ -178,10 +179,10 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
         tone = parsed.tone || null;
         intent = parsed.intent || null;
       } else {
-        throw new Error("Invalid format.");
+        throw new Error('Invalid structure');
       }
     } catch (err) {
-      console.warn("LLM returned malformed JSON:", raw);
+      console.warn('⚠️ Raw or malformed response:', raw);
       responseText = raw.trim();
     }
 
@@ -197,7 +198,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
 
     res.json({ response: responseText, tone, intent, xpGained });
   } catch (err) {
-    console.error('Chat error:', err);
+    console.error('🔥 Chat error:', err);
     res.status(500).send('LLM error');
   }
 });
