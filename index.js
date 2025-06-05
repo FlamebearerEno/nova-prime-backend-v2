@@ -145,7 +145,7 @@ async function verifyFirebaseToken(req, res, next) {
   }
 }
 
-// 🔥 CHAT ROUTE (Structured Output version)
+// 🔥 REBUILT CHAT ROUTE (Directive-as-User, No System Role)
 app.post('/chat', verifyFirebaseToken, async (req, res) => {
   const { prompt, max_tokens, temperature } = req.body;
   const userId = req.user.uid;
@@ -158,21 +158,21 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
     const bondedMemory = await getBucket(userId, 'bonded_memory');
     const userStats = await getBucket(userId, 'user_stats');
 
-    // Add user's message to memory
+    // Add user message to memory
     bondedMemory.memory.push({ role: 'user', content: prompt });
 
-    // Build message history with trimmed context
-    const directive = primeDirectiveText || "Respond with compassion and clarity.";
+    // Create base directive as a normal user message (not system!)
+    const directive = "You are a helpful assistant named Nova who responds clearly and conversationally.";
     const memorySlice = bondedMemory.memory
       .slice(-20)
       .filter(m => m?.role && typeof m.content === 'string');
 
+    // 👇 NEW: Merge directive into first user message to avoid "system" role
     const llmMessages = [
-      { role: 'system', content: directive },
+      { role: 'user', content: directive + "\n\n" + prompt },
       ...memorySlice
     ];
 
-    // Call local LLM (assumes LM Studio structured output is enabled)
     const llmResponse = await fetch(LLM_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -186,24 +186,31 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
 
     const raw = await llmResponse.text();
 
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-      if (!parsed.response || typeof parsed.response !== 'string') throw new Error();
-    } catch (err) {
-      console.error("⚠️ LLM returned invalid structured output:", raw);
-      return res.status(500).send('LLM error');
-    }
+    let responseText = '';
+    let tone = null;
+    let intent = null;
 
-    const responseText = parsed.response.trim();
-    const tone = parsed.tone || null;
-    const intent = parsed.intent || null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'string') {
+        responseText = parsed;
+      } else if (parsed?.response) {
+        responseText = parsed.response.trim();
+        tone = parsed.tone || null;
+        intent = parsed.intent || null;
+      } else {
+        throw new Error("No valid response key found.");
+      }
+    } catch (err) {
+      console.warn("⚠️ LLM returned raw text:", raw);
+      responseText = raw.trim();
+    }
 
     // Push Nova's response to memory
     bondedMemory.memory.push({ role: 'assistant', content: responseText });
     await saveFile(userId, 'bonded_memory', bondedMemory);
 
-    // Award XP
+    // XP reward
     const tokenCount = responseText.split(/\s+/).length;
     const xpGained = Math.min(tokenCount * 2, 50);
     userStats.retroXP = (userStats.retroXP || 0) + xpGained;
@@ -213,7 +220,7 @@ app.post('/chat', verifyFirebaseToken, async (req, res) => {
 
     res.json({ response: responseText, tone, intent, xpGained });
   } catch (err) {
-    console.error('Chat error:', err);
+    console.error('🔥 Chat error:', err);
     res.status(500).send('LLM error');
   }
 });
